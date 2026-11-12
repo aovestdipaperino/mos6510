@@ -306,6 +306,8 @@ impl Cpu {
         self.skip_poll = true;
         match self.t {
             1 => {
+                // The poll after the fetch cycle must not re-enter once BRK ends.
+                self.take_int = false;
                 self.read(bus, self.pc);
                 if self.entry == Entry::Brk {
                     self.pc = self.pc.wrapping_add(1);
@@ -886,5 +888,67 @@ impl Cpu {
             Op::Nop => {}
             _ => unreachable!("{:?} is not implied", self.op),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Ram(Box<[u8; 0x1_0000]>);
+
+    impl Bus for Ram {
+        fn read(&mut self, addr: u16) -> u8 {
+            self.0[usize::from(addr)]
+        }
+        fn write(&mut self, addr: u16, value: u8) {
+            self.0[usize::from(addr)] = value;
+        }
+    }
+
+    /// BRK at $0200, IRQ handler of NOPs at $0400, NMI handler of NOPs at $0300.
+    fn brk_setup() -> (Cpu, Ram) {
+        let mut ram = Ram(Box::new([0xEA; 0x1_0000]));
+        ram.0[0x0200] = 0x00;
+        ram.0[0x0201] = 0x00;
+        ram.0[0xFFFE] = 0x00;
+        ram.0[0xFFFF] = 0x04;
+        ram.0[0xFFFA] = 0x00;
+        ram.0[0xFFFB] = 0x03;
+        let mut cpu = Cpu::new(Model::Mos6502);
+        cpu.s = 0xFF;
+        cpu.p = 0x20;
+        cpu.jump(0x0200);
+        (cpu, ram)
+    }
+
+    fn tick_n(cpu: &mut Cpu, ram: &mut Ram, n: usize) {
+        for _ in 0..n {
+            cpu.tick(ram);
+        }
+    }
+
+    #[test]
+    fn an_nmi_on_brks_fetch_hijacks_it_without_a_second_entry() {
+        let (mut cpu, mut ram) = brk_setup();
+        cpu.set_nmi(true);
+        tick_n(&mut cpu, &mut ram, 7);
+        assert_eq!(cpu.pc, 0x0300);
+        assert!(!cpu.interrupt_pending());
+        tick_n(&mut cpu, &mut ram, 2);
+        assert_eq!(cpu.pc, 0x0301);
+        assert_eq!(cpu.s, 0xFC);
+    }
+
+    #[test]
+    fn an_irq_on_brks_fetch_is_not_taken_again_after_brk() {
+        let (mut cpu, mut ram) = brk_setup();
+        cpu.set_irq(true);
+        tick_n(&mut cpu, &mut ram, 7);
+        assert_eq!(cpu.pc, 0x0400);
+        assert!(!cpu.interrupt_pending());
+        tick_n(&mut cpu, &mut ram, 2);
+        assert_eq!(cpu.pc, 0x0401);
+        assert_eq!(cpu.s, 0xFC);
     }
 }
