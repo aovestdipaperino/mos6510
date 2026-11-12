@@ -9,9 +9,6 @@
 
 ---
 
-> **Status:** under construction. The core is being written against the test
-> suites described below; this notice goes away when they all pass.
-
 ## Why another 6502 in Rust?
 
 Fair question. crates.io already has a respectable pile of them, and writing a
