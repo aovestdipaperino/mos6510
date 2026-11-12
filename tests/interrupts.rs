@@ -158,3 +158,59 @@ fn a_late_nmi_during_brk_is_taken_after_the_handlers_first_instruction() {
     ticks(&mut cpu, &mut ram, 7);
     assert_eq!(cpu.pc, NMI_HANDLER);
 }
+
+#[test]
+fn an_irq_is_not_taken_while_i_is_set() {
+    let (mut cpu, mut ram) = setup(&[0xea; 16]);
+    cpu.p |= 0x04;
+    cpu.set_irq(true);
+    ticks(&mut cpu, &mut ram, 20);
+    assert_eq!(cpu.pc, 0x020a);
+    assert_eq!(cpu.s, 0xff);
+}
+
+#[test]
+fn an_irq_raised_in_the_last_cycle_waits_for_the_next_instruction() {
+    let (mut cpu, mut ram) = setup(&[0xa5, 0x10, 0xea, 0xea]); // LDA $10, NOP, NOP
+    ticks(&mut cpu, &mut ram, 2);
+    cpu.set_irq(true);
+    ticks(&mut cpu, &mut ram, 1); // LDA's last cycle: too late to be polled
+    ticks(&mut cpu, &mut ram, 2); // the NOP runs
+    ticks(&mut cpu, &mut ram, 7);
+    assert_eq!(cpu.pc, IRQ_HANDLER);
+    assert_eq!(pushed_return(&ram), 0x0203);
+}
+
+/// BNE at $02F0 taking a page-crossing branch to $0302. The IRQ handler sits
+/// at $0500 so it cannot overlap the branch target.
+fn crossing_branch() -> (Cpu, Ram) {
+    let (mut cpu, mut ram) = setup(&[]);
+    ram.load(0x02f0, &[0xd0, 0x10]); // BNE +$10: $02F2 + $10 = $0302
+    ram.load(0x0302, &[0xea; 16]);
+    ram.load(0x0500, &[0xea; 16]);
+    ram.vector(0xfffe, 0x0500);
+    cpu.jump(0x02f0);
+    (cpu, ram)
+}
+
+#[test]
+fn a_taken_branch_crossing_a_page_polls_before_the_fix_up() {
+    let (mut cpu, mut ram) = crossing_branch();
+    ticks(&mut cpu, &mut ram, 2); // fetch, operand
+    cpu.set_irq(true);
+    ticks(&mut cpu, &mut ram, 2); // the dummy read (polled), the fix-up
+    ticks(&mut cpu, &mut ram, 7);
+    assert_eq!(cpu.pc, 0x0500);
+    assert_eq!(pushed_return(&ram), 0x0302);
+}
+
+#[test]
+fn an_irq_raised_in_the_fix_up_cycle_of_a_page_crossing_branch_waits() {
+    let (mut cpu, mut ram) = crossing_branch();
+    ticks(&mut cpu, &mut ram, 3); // fetch, operand, dummy read
+    cpu.set_irq(true);
+    ticks(&mut cpu, &mut ram, 1); // the fix-up: the last cycle, never polled
+    ticks(&mut cpu, &mut ram, 2 + 7); // one NOP, then the entry
+    assert_eq!(cpu.pc, 0x0500);
+    assert_eq!(pushed_return(&ram), 0x0303);
+}

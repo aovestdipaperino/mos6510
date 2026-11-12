@@ -3,6 +3,7 @@
 # directory, default target/test-data/harte. About 1.3 GB; files already
 # present are kept. Usage: sh scripts/fetch-harte.sh [dir]
 set -eu
+cd "$(dirname "$0")/.."
 dir="${1:-target/test-data/harte}"
 mkdir -p "$dir"
 base=https://raw.githubusercontent.com/SingleStepTests/65x02/main/6502/v1

@@ -22,7 +22,7 @@ fn port_registers_read_back_and_writes_reach_ram() {
     cpu.set_port_input(0x10);
     ticks(&mut cpu, &mut ram, 2 + 3 + 2 + 3 + 3);
     assert_eq!(cpu.a, 0x37);
-    assert_eq!(cpu.port_output(), 0x37);
+    assert_eq!(cpu.port_pins(), 0x37);
     assert_eq!(ram.mem[0], 0x2f, "the write also reaches RAM");
     assert_eq!(ram.mem[1], 0x37, "the write also reaches RAM");
 }
@@ -46,7 +46,7 @@ fn input_bits_follow_the_pins() {
     cpu.set_port_input(0xa5);
     ticks(&mut cpu, &mut ram, 3);
     assert_eq!(cpu.a, 0xa5);
-    assert_eq!(cpu.port_output(), 0xa5);
+    assert_eq!(cpu.port_pins(), 0xa5);
 }
 
 #[test]

@@ -4,7 +4,8 @@
 //!
 //! The data (~1.3 GB) is not in the repository. Fetch it with
 //! `sh scripts/fetch-harte.sh` and run with `HARTE_DIR=target/test-data/harte`.
-//! Without it the test is skipped. `HARTE_OPS=69,6b` limits the run.
+//! The test is ignored by default and panics if the data is missing; run it
+//! with `cargo test --release -- --include-ignored`. `HARTE_OPS=69,6b` limits the run.
 
 use mos6510::{Bus, Cpu, Model};
 use serde_json::Value;
@@ -41,7 +42,12 @@ fn word(v: &Value) -> u16 {
     u16::try_from(num(v)).expect("a 16-bit value")
 }
 
-fn run_case(case: &Value, bus: &mut TestBus) -> Result<(), String> {
+/// The twelve opcodes that jam the processor.
+const JAMS: [u8; 12] = [
+    0x02, 0x12, 0x22, 0x32, 0x42, 0x52, 0x62, 0x72, 0x92, 0xb2, 0xd2, 0xf2,
+];
+
+fn run_case(op: u8, case: &Value, bus: &mut TestBus) -> Result<(), String> {
     let init = &case["initial"];
     let fin = &case["final"];
     let ram_init = init["ram"].as_array().expect("initial ram");
@@ -86,6 +92,16 @@ fn run_case(case: &Value, bus: &mut TestBus) -> Result<(), String> {
             cycles.len()
         ));
     }
+    if result.is_ok() && JAMS.contains(&op) {
+        if !cpu.jammed() {
+            result = Err(format!("not jammed after {} cycles", cycles.len()));
+        }
+    } else if result.is_ok() && !cpu.at_instruction_boundary() {
+        result = Err(format!(
+            "not at an instruction boundary after {} cycles",
+            cycles.len()
+        ));
+    }
     if result.is_ok() {
         let regs = [
             ("pc", u64::from(cpu.pc), num(&fin["pc"])),
@@ -126,15 +142,16 @@ fn run_case(case: &Value, bus: &mut TestBus) -> Result<(), String> {
 }
 
 #[test]
+#[ignore = "needs HARTE_DIR (see scripts/fetch-harte.sh)"]
 fn harte_single_step_tests() {
     let Some(dir) = std::env::var_os("HARTE_DIR").map(PathBuf::from) else {
-        eprintln!("skipped: HARTE_DIR is not set (run scripts/fetch-harte.sh)");
-        return;
+        panic!("HARTE_DIR is not set (run scripts/fetch-harte.sh)");
     };
-    if !dir.is_dir() {
-        eprintln!("skipped: {} is not a directory", dir.display());
-        return;
-    }
+    assert!(
+        dir.is_dir(),
+        "{} is not a directory (run scripts/fetch-harte.sh)",
+        dir.display()
+    );
     let only: Option<Vec<u8>> = std::env::var("HARTE_OPS").ok().map(|s| {
         s.split(',')
             .map(|h| u8::from_str_radix(h.trim(), 16).expect("HARTE_OPS takes hex opcodes"))
@@ -160,7 +177,7 @@ fn harte_single_step_tests() {
         let mut bad = 0;
         let mut first = None;
         for case in &cases {
-            if let Err(e) = run_case(case, &mut bus) {
+            if let Err(e) = run_case(op, case, &mut bus) {
                 bad += 1;
                 first.get_or_insert_with(|| format!("{}: {e}", case["name"]));
             }

@@ -5,6 +5,31 @@
 //! in lockstep with other chips. All 256 opcodes are implemented, including
 //! every undocumented one, and interrupts are sampled where the NMOS part
 //! samples them.
+//!
+//! # Example
+//!
+//! ```
+//! use mos6510::{Bus, Cpu, Model};
+//!
+//! struct Ram(Vec<u8>);
+//!
+//! impl Bus for Ram {
+//!     fn read(&mut self, addr: u16) -> u8 {
+//!         self.0[usize::from(addr)]
+//!     }
+//!     fn write(&mut self, addr: u16, value: u8) {
+//!         self.0[usize::from(addr)] = value;
+//!     }
+//! }
+//!
+//! let mut ram = Ram(vec![0; 0x1_0000]);
+//! ram.0[0x0200..0x0202].copy_from_slice(&[0xa9, 0x42]); // LDA #$42
+//! let mut cpu = Cpu::new(Model::Mos6502);
+//! cpu.jump(0x0200);
+//! cpu.tick(&mut ram);
+//! cpu.tick(&mut ram);
+//! assert_eq!(cpu.a, 0x42);
+//! ```
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -34,6 +59,7 @@ pub trait Bus {
 
 /// Which part to emulate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Model {
     /// The C64's processor: a 6502 with an I/O port at `$00`/`$01`.
     Mos6510,
@@ -120,7 +146,8 @@ impl Cpu {
     }
 
     /// Run the 7-cycle reset sequence from the next tick: three stack reads
-    /// that decrement S, then PC from `$FFFC`, with I set.
+    /// that decrement S, then PC from `$FFFC`, with I set. A pending NMI edge
+    /// survives the reset.
     pub fn reset(&mut self) {
         self.reset_pending = true;
         self.jammed = false;
@@ -130,6 +157,10 @@ impl Cpu {
 
     /// Start executing at `pc` on the next tick, abandoning any instruction in
     /// progress and any pending reset. For hosts that call routines directly.
+    ///
+    /// An interrupt decision already latched (an IRQ) is dropped, and so is a
+    /// pending reset. A pending NMI edge survives and is taken after the
+    /// first instruction.
     pub fn jump(&mut self, pc: u16) {
         self.pc = pc;
         self.t = 0;
@@ -153,35 +184,54 @@ impl Cpu {
     }
 
     /// The next tick starts a new instruction (or an interrupt sequence).
+    ///
+    /// Also true while a reset is pending, including right after
+    /// [`Cpu::new`]; the next tick then starts the reset sequence.
+    #[must_use]
     pub fn at_instruction_boundary(&self) -> bool {
         self.t == 0 && !self.jammed
     }
 
     /// At a boundary, the next tick begins an interrupt sequence rather than
     /// an opcode fetch.
+    ///
+    /// This reports a decision already latched in the previous instruction's
+    /// penultimate cycle. Changing the IRQ line or `p` at the boundary does
+    /// not cancel it, as on hardware.
+    #[must_use]
     pub fn interrupt_pending(&self) -> bool {
         self.at_instruction_boundary() && !self.reset_pending && self.take_int
     }
 
     /// A JAM opcode ran. Only [`Cpu::reset`] or [`Cpu::jump`] recovers.
+    #[must_use]
     pub fn jammed(&self) -> bool {
         self.jammed
     }
 
-    /// The I/O port's pin levels (`Model::Mos6510`): outputs as written to
-    /// `$01`, inputs as set by [`Cpu::set_port_input`].
-    pub fn port_output(&self) -> u8 {
+    /// All eight pin levels of the I/O port (`Model::Mos6510`): bits driven as
+    /// outputs show what was written to `$01`, the rest show the inputs set by
+    /// [`Cpu::set_port_input`]. Has no meaning on `Model::Mos6502`.
+    #[must_use]
+    pub fn port_pins(&self) -> u8 {
         self.port.levels()
     }
 
-    /// What external circuitry pulls the port pins to. Default: all high.
+    /// What external circuitry pulls the port pins to. Default: all high
+    /// (`0xFF`). Has no effect on `Model::Mos6502`.
+    ///
+    /// On a C64 use `0x10`: cassette sense high, and the unconnected bits 6-7
+    /// read 0, so that with the Kernal's `$00=$2F` / `$01=$37` a read of `$01`
+    /// returns `$37`. The default `0xFF` reads `$F7`. The slow fade of
+    /// undriven bits and the VIC's last-read byte showing under `$00`/`$01`
+    /// are not modelled.
     pub fn set_port_input(&mut self, pins: u8) {
         self.port.pins = pins;
     }
 
     /// Load the port's direction (`$00`) and data (`$01`) registers directly,
     /// for a host that starts a program without running the code that would
-    /// set them.
+    /// set them. Has no effect on `Model::Mos6502`.
     pub fn set_port_registers(&mut self, ddr: u8, data: u8) {
         self.port.ddr = ddr;
         self.port.data = data;
@@ -520,6 +570,7 @@ impl Cpu {
 
     /// The processor locks up: after the fetch it reads PC, then `$FFFF`,
     /// `$FFFE`, `$FFFE`, then `$FFFF` forever.
+    // `t` saturates at 255, so the last arm repeats forever.
     fn jam(&mut self, bus: &mut impl Bus) -> bool {
         self.skip_poll = true;
         match self.t {

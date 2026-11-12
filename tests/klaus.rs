@@ -4,6 +4,8 @@
 //!
 //! The binary is GPL-3.0 and not in the repository. Fetch it with
 //! `sh scripts/fetch-klaus.sh` and run with `KLAUS_DIR=target/test-data/klaus`.
+//! The test is ignored by default and panics if the data is missing; run it
+//! with `cargo test --release -- --include-ignored`.
 
 use mos6510::{Bus, Cpu, Model};
 use std::path::PathBuf;
@@ -23,15 +25,14 @@ impl Bus for Flat {
 }
 
 #[test]
+#[ignore = "needs KLAUS_DIR (see scripts/fetch-klaus.sh)"]
 fn klaus_dormann_functional_test() {
     let Some(dir) = std::env::var_os("KLAUS_DIR").map(PathBuf::from) else {
-        eprintln!("skipped: KLAUS_DIR is not set (run scripts/fetch-klaus.sh)");
-        return;
+        panic!("KLAUS_DIR is not set (run scripts/fetch-klaus.sh)");
     };
     let path = dir.join("6502_functional_test.bin");
     let Ok(image) = std::fs::read(&path) else {
-        eprintln!("skipped: {} not found", path.display());
-        return;
+        panic!("{} not found (run scripts/fetch-klaus.sh)", path.display());
     };
     assert_eq!(image.len(), 0x1_0000, "the image must be a full 64 KiB");
 

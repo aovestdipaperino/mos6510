@@ -2,6 +2,7 @@
 name = "mos6510"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 authors = ["Enzo Lombardi <enzinol@gmail.com>"]
 description = "Cycle-exact MOS 6510/6502 CPU core with every undocumented opcode"
 license = "MIT OR Apache-2.0"

@@ -33,7 +33,7 @@ test suite turned up the real culprits:
 - `SBC` subtracted the carry instead of the borrow, an off-by-one in every
   subtraction.
 - `PHP` turned the Break flag into Carry on its way to the stack.
-- Every undocumented opcode was a polite no-op.
+- Every undocumented opcode beyond the NOPs was a polite no-op.
 
 With those instructions patched around, all 16 tunes played. A patch layer over
 a CPU that fails its test suite is not a foundation, though, so this crate is
@@ -127,10 +127,11 @@ GPL-3.0). Fetch it, then run:
 ```sh
 sh scripts/fetch-harte.sh
 sh scripts/fetch-klaus.sh
-HARTE_DIR=target/test-data/harte KLAUS_DIR=target/test-data/klaus cargo test --release
+HARTE_DIR=target/test-data/harte KLAUS_DIR=target/test-data/klaus cargo test --release -- --include-ignored
 ```
 
-Without the data, those two tests print that they were skipped and pass.
+Without the data the two tests are listed as ignored; `--include-ignored`
+runs them and they fail loudly if the data is missing.
 
 ## What it does not do
 
