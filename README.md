@@ -1,3 +1,5 @@
+[![GitHub stars](https://img.shields.io/github/stars/aovestdipaperino/mos6510?logo=github&color=brightgreen)](https://github.com/aovestdipaperino/mos6510/stargazers)
+
 <p align="center">
   <img src="assets/logo.svg" alt="mos6510: a winking 40-pin chip" width="480">
 </p>
